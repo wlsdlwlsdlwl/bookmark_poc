@@ -100,3 +100,38 @@ Future<List<String>> getPlaceBasedRecommendation(String userId) async {
 
     return recommended;
 }
+
+/// 현재 위치의 장소 유형(한글)만 반환하는 헬퍼
+Future<String> getCurrentPlaceType() async {
+  // 1) 위치 권한/서비스 체크를 포함한 현재 위치 획득
+  final position = await getCurrentLocation();
+
+  // 2) Google Places API 호출 (primaryTypeDisplayName.text)
+  final url = Uri.parse('https://places.googleapis.com/v1/places:searchNearby');
+  final headers = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': 'AIzaSyCTdKtW-AzcRR8IDjxk_B-bIwy5tNoCi3Y',
+    'X-Goog-FieldMask': 'places.primaryTypeDisplayName.text',
+  };
+  final body = jsonEncode({
+    'languageCode': 'ko',
+    'maxResultCount': 1,
+    'locationRestriction': {
+      'circle': {
+        'center': {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+        },
+        'radius': 100.0,
+      }
+    }
+  });
+
+  final response = await http.post(url, headers: headers, body: body);
+  if (response.statusCode != 200) return '알 수 없음';
+
+  final jsonData = jsonDecode(response.body);
+  // API 응답에서 텍스트 필드만 추출
+  return jsonData['places']?[0]?['primaryTypeDisplayName']?['text'] as String
+         ?? '알 수 없음';
+}
