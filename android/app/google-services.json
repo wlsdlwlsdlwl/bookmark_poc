@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "450875008009",
+    "firebase_url": "https://bookmarkpoc-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "bookmarkpoc",
+    "storage_bucket": "bookmarkpoc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450875008009:android:36472a795b5e700e7c84d8",
+        "android_client_info": {
+          "package_name": "com.example.bookmark_poc"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9lTj_uYjSyn2eK-kiLZ5aud4DaR0ZllU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
