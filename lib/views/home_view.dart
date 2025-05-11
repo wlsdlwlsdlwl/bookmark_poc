@@ -1,35 +1,73 @@
 // lib/views/home_view.dart
 
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 import '../controllers/recommendation_controller.dart';
-import '../models/bookmark.dart';
+import 'bookmark_list_view.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({Key? key}) : super(key: key);
-
   @override
   State<HomeView> createState() => _HomeViewState();
 }
 
 class _HomeViewState extends State<HomeView> {
   final _ctrl = RecommendationController();
+
   String _timeRec = '';
   String _placeRec = '';
+  Timer? _timer;                            // 시간 업데이트용
+  StreamSubscription<Position>? _posSub;    // 위치 업데이트용
 
   @override
   void initState() {
     super.initState();
-    _loadRecs();
+    _scheduleTimeUpdates();
+    _listenLocationUpdates();
   }
 
-  Future<void> _loadRecs() async {
-    final t = await _ctrl.loadTimeRec();
-    final p = await _ctrl.loadPlaceRec();
-    setState(() {
-      _timeRec = t;
-      _placeRec = p;
+  /// 1) 시간 기반 추천을 매 분마다 재계산
+  void _scheduleTimeUpdates() {
+    // 즉시 한 번 실행
+    _updateTimeRec();
+    // 매 1분마다, 또는 분이 달라지면 재계산
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _updateTimeRec();
     });
+  }
+
+  Future<void> _updateTimeRec() async {
+    final rec = await _ctrl.loadTimeRec();
+    setState(() => _timeRec = rec);
+  }
+
+  /// 2) 위치 변화가 감지될 때마다 장소 추천 재계산
+  void _listenLocationUpdates() {
+    // 권한 등은 컨트롤러 안에서 이미 처리한다고 가정
+    final settings = const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 50, // 50m 이상 이동 시만 이벤트 발생
+    );
+    _posSub = Geolocator.getPositionStream(locationSettings: settings)
+        .listen((_) async {
+      final rec = await _ctrl.loadPlaceRec();
+      setState(() => _placeRec = rec);
+    });
+    // 앱 시작 시 장소 추천도 한 번 실행
+    _updatePlaceRec();
+  }
+
+  Future<void> _updatePlaceRec() async {
+    final rec = await _ctrl.loadPlaceRec();
+    setState(() => _placeRec = rec);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _posSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -39,62 +77,22 @@ class _HomeViewState extends State<HomeView> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 시간 기반 추천 텍스트
+          // 라이브 시간 추천
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Text(
-              _timeRec,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            child: Text(_timeRec, style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
-
-          // 위치 기반 추천 텍스트
+          // 라이브 위치 추천
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Text(
-              _placeRec,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            child: Text(_placeRec, style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
 
           // 북마크 리스트
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('bookmarks')
-                  .where('userId', isEqualTo: _ctrl.userId)
-                  .snapshots(),
-              builder: (context, snap) {
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final docs = snap.data!.docs;
-                if (docs.isEmpty) {
-                  return const Center(child: Text('저장된 북마크가 없습니다.'));
-                }
-                return ListView.builder(
-                  itemCount: docs.length,
-                  itemBuilder: (ctx, i) {
-                    final docSnap = docs[i];
-                    final bm = Bookmark.fromJson(docSnap.data() as Map<String, dynamic>);
-                    final docId = docSnap.id; // Firestore 문서 ID
-
-                    return ListTile(
-                      title: Text(bm.title),
-                      subtitle: Text('태그: ${bm.tags.join(', ')}'),
-                      trailing: ElevatedButton(
-                        onPressed: () async {
-                          // 1) 먼저 시간 기반 추천을 새로 계산해서 _timeRec에 반영
-                          await _loadRecs();
-                          // 2) 그 다음 열람 처리를 해서 wasOpened=true로 업데이트
-                          await _ctrl.logView(docId, bm.tags);
-                        },
-                        child: const Text('열람'),
-                      ),
-                    );
-                  },
-                );
-              },
+            child: BookmarkListView(
+              controller: _ctrl,
+              onOpened: _updateTimeRec, // “열람” 시에도 시간 추천 즉시 업데이트
             ),
           ),
         ],

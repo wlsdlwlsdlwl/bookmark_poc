@@ -1,16 +1,30 @@
-# bookmark_poc
+📋 프로젝트 개요
 
-A new Flutter project.
+목표: 앱 실행 시 시간·위치에 맞춰 미열람 북마크를 추천
 
-## Getting Started
+주요 기능
 
-This project is a starting point for a Flutter application.
+시간 기반 추천 (time_recommender.dart)
 
-A few resources to get you started if this is your first Flutter project:
+위치 기반 추천 (geo_recommender.dart)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Firestore 로그(logs 컬렉션) 기록 및 추천 갱신
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+구조
+
+lib/
+├─ services/                # 추천 로직 (Time / Geo)
+├─ controllers/             # PoC용 Controller
+├─ models/                  # Data models
+├─ views/                   # UI (HomeView, BookmarkListView)
+└─ main.dart                # 앱 시작 및 환경 로드
+
+🔧 초기 설정
+
+.env 파일은 notion에 첨부하였습니다. (https://www.notion.so/seongjxn-lab/PoC-1ee60461f44e801fb87ec29e0989dd3b?pvs=4)
+
+pubspec.yaml 에 애셋 등록 확인
+
+flutter:
+  assets:
+    - .env    # 환경변수 파일

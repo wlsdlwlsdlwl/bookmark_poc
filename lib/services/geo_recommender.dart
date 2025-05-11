@@ -1,8 +1,10 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert'; // JSON 파싱을 위한 것도 같이 필요
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:convert';
 
+/// 현재 위치를 얻어오는 유틸
 Future<Position> getCurrentLocation() async {
   bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
   if (!serviceEnabled) {
@@ -17,100 +19,20 @@ Future<Position> getCurrentLocation() async {
     }
   }
 
-  return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  return await Geolocator.getCurrentPosition(
+    desiredAccuracy: LocationAccuracy.bestForNavigation,
+  );
 }
 
-Future<List<String>> getPlaceBasedRecommendation(String userId) async {
-  // 1. 현재 위치 획득
-  final position = await Geolocator.getCurrentPosition(
-  desiredAccuracy: LocationAccuracy.bestForNavigation,
-);
-  print("📍 현재 위치: ${position.latitude}, ${position.longitude}");
-
-  // 2. Google Places API (v1) - Nearby Search 호출
-  final url = Uri.parse('https://places.googleapis.com/v1/places:searchNearby');
-
-  final headers = {
-    'Content-Type': 'application/json',
-    'X-Goog-Api-Key': 'AIzaSyCTdKtW-AzcRR8IDjxk_B-bIwy5tNoCi3Y', // 보안상 환경 변수로 관리 권장
-    'X-Goog-FieldMask': 'places.primaryTypeDisplayName',
-  };
-
-  final body = jsonEncode({
-    'languageCode': 'ko',
-    'maxResultCount': 1,
-    'locationRestriction': {
-      'circle': {
-        'center': {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-        },
-        'radius': 100.0
-      }
-    }
-  });
-
-  final response = await http.post(url, headers: headers, body: body);
-  if (response.statusCode != 200) {
-    print("❌ API 요청 실패: ${response.body}");
-    return [];
-  }
-
-  final jsonData = jsonDecode(response.body);
-  final displayName = jsonData['places']?[0]?['primaryTypeDisplayName']?['text'];
-  print("🗂 장소 유형 (한글): $displayName");
-
-  final location = displayName ?? '알 수 없음';
-
-  // 3. logs 컬렉션에서 해당 장소에서 자주 본 태그 찾기
-  final logsSnapshot = await FirebaseFirestore.instance
-      .collection('logs')
-      .where('userId', isEqualTo: userId)
-      .where('location', isEqualTo: location)
-      .get();
-
-  final tagCount = <String, int>{};
-  for (var doc in logsSnapshot.docs) {
-    final tags = List<String>.from(doc['tags']);
-    for (var tag in tags) {
-      tagCount[tag] = (tagCount[tag] ?? 0) + 1;
-    }
-  }
-
-  if (tagCount.isEmpty) return [];
-
-  // 4. 가장 많이 본 태그 선정
-  final topTag = tagCount.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-
-  // 5. 북마크 컬렉션에서 해당 태그 + wasOpened == false 조건으로 추천
-  final bookmarksSnapshot = await FirebaseFirestore.instance
-      .collection('bookmarks')
-      .where('userId', isEqualTo: userId)
-      .where('tags', arrayContains: topTag)
-      .where('wasOpened', isEqualTo: false)
-      .get();
-
-  final recommended = bookmarksSnapshot.docs
-        .where((doc) {
-          final tags = List<String>.from(doc['tags']);
-          return tags.contains(topTag);
-        })
-        .map((doc) => doc['title'] as String)
-        .toList();
-
-    return recommended;
-}
-
-/// 현재 위치의 장소 유형(한글)만 반환하는 헬퍼
-Future<String> getCurrentPlaceType() async {
-  // 1) 위치 권한/서비스 체크를 포함한 현재 위치 획득
+/// 공통: Places API로부터 현재 장소 유형(한글)만 가져오는 내부 헬퍼
+Future<String> _fetchPrimaryPlaceType() async {
   final position = await getCurrentLocation();
-
-  // 2) Google Places API 호출 (primaryTypeDisplayName.text)
+  final apiKey = dotenv.env['GOOGLE_PLACES_API_KEY']!;
   final url = Uri.parse('https://places.googleapis.com/v1/places:searchNearby');
+
   final headers = {
     'Content-Type': 'application/json',
-    'X-Goog-Api-Key': 'AIzaSyCTdKtW-AzcRR8IDjxk_B-bIwy5tNoCi3Y',
+    'X-Goog-Api-Key': apiKey,
     'X-Goog-FieldMask': 'places.primaryTypeDisplayName.text',
   };
   final body = jsonEncode({
@@ -122,16 +44,50 @@ Future<String> getCurrentPlaceType() async {
           'latitude': position.latitude,
           'longitude': position.longitude,
         },
-        'radius': 100.0,
+        'radius': 50.0,
       }
     }
   });
 
-  final response = await http.post(url, headers: headers, body: body);
-  if (response.statusCode != 200) return '알 수 없음';
+  final resp = await http.post(url, headers: headers, body: body);
+  if (resp.statusCode != 200) return '알 수 없음';
+  final data = jsonDecode(resp.body);
+  return (data['places']?[0]?['primaryTypeDisplayName']?['text'] as String?) ?? '알 수 없음';
+}
 
-  final jsonData = jsonDecode(response.body);
-  // API 응답에서 텍스트 필드만 추출
-  return jsonData['places']?[0]?['primaryTypeDisplayName']?['text'] as String
-         ?? '알 수 없음';
+/// 외부에 노출: 순수 장소 유형만 필요할 때
+Future<String> getCurrentPlaceType() {
+  return _fetchPrimaryPlaceType();
+}
+
+/// 외부에 노출: 장소 기반 추천이 필요할 때
+Future<List<String>> getPlaceBasedRecommendation(String userId) async {
+  // 1) 장소 유형만 꺼내고
+  final placeType = await _fetchPrimaryPlaceType();
+
+  // 2) logs에서 태그 집계
+  final logs = await FirebaseFirestore.instance
+      .collection('logs')
+      .where('userId', isEqualTo: userId)
+      .where('location', isEqualTo: placeType)
+      .get();
+  final tagCount = <String,int>{};
+  for (var doc in logs.docs) {
+    for (var tag in List<String>.from(doc['tags'])) {
+      tagCount[tag] = (tagCount[tag] ?? 0) + 1;
+    }
+  }
+  if (tagCount.isEmpty) return [];
+
+  final topTag = tagCount.entries.reduce((a,b) => a.value>b.value ? a : b).key;
+
+  // 3) 북마크에서 추천 후보 추출
+  final bms = await FirebaseFirestore.instance
+      .collection('bookmarks')
+      .where('userId', isEqualTo: userId)
+      .where('tags', arrayContains: topTag)
+      .where('wasOpened', isEqualTo: false)
+      .get();
+
+  return bms.docs.map((d) => d['title'] as String).toList();
 }

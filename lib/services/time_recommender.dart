@@ -1,44 +1,62 @@
+// lib/services/time_recommender.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// 시간 기반 추천: 주 함수
 Future<List<String>> getTimeBasedRecommendation(String userId) async {
-  final now = DateTime.now();
-  final currentHour = now.hour;
+  final currentHour = DateTime.now().hour;
 
-  // 1. 현재 시간대에 열람한 로그 가져오기
-  final logsSnapshot = await FirebaseFirestore.instance
-      .collection('logs')
-      .where('userId', isEqualTo: userId)
-      .where('hour', isEqualTo: currentHour) // 그냥 정확히 맞추자 (PoC니까)
-      .get();
-
-  final Map<String, int> tagCount = {};
-  for (var doc in logsSnapshot.docs) {
-    final tags = List<String>.from(doc['tags']);
-    for (var tag in tags) {
-      tagCount[tag] = (tagCount[tag] ?? 0) + 1;
-    }
-  }
+  // 1) 해당 시간대의 태그별 열람 횟수 집계
+  final tagCount = await _countTags(
+    userId: userId,
+    field: 'hour',
+    value: currentHour,
+  );
 
   if (tagCount.isEmpty) return [];
 
-  final topTag = (tagCount.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value)))
-      .first.key;
+  // 2) 최다 열람 태그 선택
+  final topTag = _selectTopTag(tagCount);
 
-  // 2. 아직 열람하지 않은 북마크 중 해당 태그 가진 것 추천
-  final bookmarksSnapshot = await FirebaseFirestore.instance
+  // 3) 상위 태그 기반 미열람 북마크 제목 반환
+  return _fetchUnopenedBookmarkTitles(userId, topTag);
+}
+
+/// 로그에서 주어진 필드에 해당하는 태그별 집계 생성
+Future<Map<String, int>> _countTags({
+  required String userId,
+  required String field,
+  required Object value,
+}) async {
+  final snap = await FirebaseFirestore.instance
+      .collection('logs')
+      .where('userId', isEqualTo: userId)
+      .where(field, isEqualTo: value)
+      .get();
+
+  final counts = <String, int>{};
+  for (var doc in snap.docs) {
+    for (var tag in List<String>.from(doc['tags'])) {
+      counts[tag] = (counts[tag] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/// 태그별 집계에서 최다 태그를 선택
+String _selectTopTag(Map<String, int> counts) {
+  return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+}
+
+/// 미열람 상태인 북마크 중 특정 태그를 가진 제목 목록 조회
+Future<List<String>> _fetchUnopenedBookmarkTitles(
+    String userId, String tag) async {
+  final snap = await FirebaseFirestore.instance
       .collection('bookmarks')
       .where('userId', isEqualTo: userId)
+      .where('tags', arrayContains: tag)
       .where('wasOpened', isEqualTo: false)
       .get();
 
-  final recommendedTitles = bookmarksSnapshot.docs
-      .where((doc) {
-        final tags = List<String>.from(doc['tags']);
-        return tags.contains(topTag);
-      })
-      .map((doc) => doc['title'] as String)
-      .toList();
-
-  return recommendedTitles;
+  return snap.docs.map((d) => d['title'] as String).toList();
 }
