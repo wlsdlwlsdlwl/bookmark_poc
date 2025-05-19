@@ -1,8 +1,5 @@
 import 'package:geolocator/geolocator.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
 
 /// 현재 위치를 얻어오는 유틸
 Future<Position> getCurrentLocation() async {
@@ -24,70 +21,31 @@ Future<Position> getCurrentLocation() async {
   );
 }
 
-/// 공통: Places API로부터 현재 장소 유형(한글)만 가져오는 내부 헬퍼
-Future<String> _fetchPrimaryPlaceType() async {
-  final position = await getCurrentLocation();
-  final apiKey = dotenv.env['GOOGLE_PLACES_API_KEY']!;
-  final url = Uri.parse('https://places.googleapis.com/v1/places:searchNearby');
+Future<PlaceRecommendationResult> getPlaceRecommendation(String userId) async {
+  try {
+    final position = await getCurrentLocation();
 
-  final headers = {
-    'Content-Type': 'application/json',
-    'X-Goog-Api-Key': apiKey,
-    'X-Goog-FieldMask': 'places.primaryTypeDisplayName.text',
-  };
-  final body = jsonEncode({
-    'languageCode': 'ko',
-    'maxResultCount': 1,
-    'locationRestriction': {
-      'circle': {
-        'center': {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-        },
-        'radius': 50.0,
-      }
-    }
-  });
+    final callable = FirebaseFunctions.instance.httpsCallable('geoRecommender');
+    final result = await callable.call({
+      'userId': userId,
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+    });
 
-  final resp = await http.post(url, headers: headers, body: body);
-  if (resp.statusCode != 200) return '알 수 없음';
-  final data = jsonDecode(resp.body);
-  return (data['places']?[0]?['primaryTypeDisplayName']?['text'] as String?) ?? '알 수 없음';
-}
+    final data = result.data;
+    final placeType = data['placeType'] ?? '알 수 없음';
+    final recs = List<String>.from(data['recommendations'] ?? []);
 
-/// 외부에 노출: 순수 장소 유형만 필요할 때
-Future<String> getCurrentPlaceType() {
-  return _fetchPrimaryPlaceType();
-}
-
-/// 외부에 노출: 장소 기반 추천이 필요할 때
-Future<List<String>> getPlaceBasedRecommendation(String userId) async {
-  // 1) 장소 유형만 꺼내고
-  final placeType = await _fetchPrimaryPlaceType();
-
-  // 2) logs에서 태그 집계
-  final logs = await FirebaseFirestore.instance
-      .collection('logs')
-      .where('userId', isEqualTo: userId)
-      .where('location', isEqualTo: placeType)
-      .get();
-  final tagCount = <String,int>{};
-  for (var doc in logs.docs) {
-    for (var tag in List<String>.from(doc['tags'])) {
-      tagCount[tag] = (tagCount[tag] ?? 0) + 1;
-    }
+    return PlaceRecommendationResult(placeType, recs);
+  } catch (e) {
+    print('❌ 장소 추천 실패: $e');
+    return PlaceRecommendationResult('알 수 없음', []);
   }
-  if (tagCount.isEmpty) return [];
+}
 
-  final topTag = tagCount.entries.reduce((a,b) => a.value>b.value ? a : b).key;
+class PlaceRecommendationResult {
+  final String placeType;
+  final List<String> recommendations;
 
-  // 3) 북마크에서 추천 후보 추출
-  final bms = await FirebaseFirestore.instance
-      .collection('bookmarks')
-      .where('userId', isEqualTo: userId)
-      .where('tags', arrayContains: topTag)
-      .where('wasOpened', isEqualTo: false)
-      .get();
-
-  return bms.docs.map((d) => d['title'] as String).toList();
+  PlaceRecommendationResult(this.placeType, this.recommendations);
 }

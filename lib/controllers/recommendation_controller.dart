@@ -15,36 +15,34 @@ class RecommendationController {
     return '[$hour시] 추천 : $title';
   }
 
-  /// 장소 기반 추천 문자열
+  /// 장소 기반 추천 문자열 (Cloud Function 사용)
   Future<String> loadPlaceRec() async {
-    // 1) 현재 장소 유형 한글로
-    final placeType = await getCurrentPlaceType();  
-    // 2) 해당 장소 기반 추천 북마크 제목
-    final list = await getPlaceBasedRecommendation(userId);
-    final title = list.isNotEmpty ? list.first : '없음';
-    return '[$placeType]에서 추천 : $title';
+    final result = await getPlaceRecommendation(userId);
+    final placeType = result.placeType;
+    final recs = result.recommendations;
+    final title = recs.isNotEmpty ? recs.first : '없음';
+    return '[$placeType]에서 추천: $title';
   }
 
+  /// 북마크 열람 로그 기록
   Future<void> logView(
-    String docId,          // 실제 Firestore 문서 ID
+    String docId,
     List<String> tags,
   ) async {
-    // 1) 순수 장소 유형 조회
-    final placeType = await getCurrentPlaceType();
+    final result = await getPlaceRecommendation(userId);
+    final placeType = result.placeType;
 
-    // 2) 로그 기록
     final now = DateTime.now();
     final col = FirebaseFirestore.instance;
     await col.collection('logs').add({
       'userId': userId,
-      'bookmarkDocId': docId,  // (선택) docId를 저장해도 좋습니다
+      'bookmarkDocId': docId,
       'tags': tags,
       'location': placeType,
       'hour': now.hour,
       'timestamp': Timestamp.now(),
     });
 
-    // 3) wasOpened 업데이트: 쿼리 대신 바로 문서 ID로
     await col
         .collection('bookmarks')
         .doc(docId)

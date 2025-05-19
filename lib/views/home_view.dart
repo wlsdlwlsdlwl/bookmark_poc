@@ -1,6 +1,7 @@
 // lib/views/home_view.dart
 
 import 'dart:async';
+import '../services/geo_recommender.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../controllers/recommendation_controller.dart';
@@ -26,7 +27,6 @@ class _HomeViewState extends State<HomeView> {
     _scheduleTimeUpdates();
     _listenLocationUpdates();
   }
-
   /// 1) 시간 기반 추천을 매 분마다 재계산
   void _scheduleTimeUpdates() {
     // 즉시 한 번 실행
@@ -58,10 +58,21 @@ class _HomeViewState extends State<HomeView> {
     _updatePlaceRec();
   }
 
-  Future<void> _updatePlaceRec() async {
-    final rec = await _ctrl.loadPlaceRec();
-    setState(() => _placeRec = rec);
+Future<void> _updatePlaceRec() async {
+  try {
+    final rec = await _ctrl.loadPlaceRec(); // ✅ 수정 포인트
+    if (!mounted) return;
+
+    setState(() {
+      _placeRec = rec;
+    });
+  } catch (e) {
+    print('❌ 위치 기반 추천 실패: $e');
+    setState(() {
+      _placeRec = '⚠️ 추천 중 오류가 발생했어요.';
+    });
   }
+}
 
   @override
   void dispose() {
@@ -87,7 +98,6 @@ class _HomeViewState extends State<HomeView> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Text(_placeRec, style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
-
           // 북마크 리스트
           Expanded(
             child: BookmarkListView(
