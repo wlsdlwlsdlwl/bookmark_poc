@@ -2,6 +2,9 @@ pluginManagement {
     val flutterSdkPath = run {
         val properties = java.util.Properties()
         file("local.properties").inputStream().use { properties.load(it) }
+        
+        println("📌 local.properties 경로: ${file("$rootDir/local.properties").absolutePath}")
+
         val flutterSdkPath = properties.getProperty("flutter.sdk")
         require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
         flutterSdkPath
@@ -26,3 +29,4 @@ plugins {
 }
 
 include(":app")
+

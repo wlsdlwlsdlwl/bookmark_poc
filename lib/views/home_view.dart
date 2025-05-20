@@ -23,9 +23,21 @@ class _HomeViewState extends State<HomeView> {
   @override
   void initState() {
     super.initState();
+    _triggerInitialLocation(); // 👉 추가
     _scheduleTimeUpdates();
     _listenLocationUpdates();
   }
+
+  void _triggerInitialLocation() async {
+  try {
+    final pos = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.bestForNavigation,
+    );
+    print("🌍 초기 위치 확인: ${pos.latitude}, ${pos.longitude}");
+  } catch (e) {
+    print("❌ 초기 위치 확인 실패: $e");
+  }
+}
 
   /// 1) 시간 기반 추천을 매 분마다 재계산
   void _scheduleTimeUpdates() {
@@ -51,17 +63,13 @@ class _HomeViewState extends State<HomeView> {
     );
     _posSub = Geolocator.getPositionStream(locationSettings: settings)
         .listen((_) async {
+        _ctrl.invalidateLocationCache(); // ✅ 컨트롤러 경유 호출
+
       final rec = await _ctrl.loadPlaceRec();
-      setState(() => _placeRec = rec);
+      if (mounted) setState(() => _placeRec = rec);
     });
-    // 앱 시작 시 장소 추천도 한 번 실행
-    _updatePlaceRec();
   }
 
-  Future<void> _updatePlaceRec() async {
-    final rec = await _ctrl.loadPlaceRec();
-    setState(() => _placeRec = rec);
-  }
 
   @override
   void dispose() {
@@ -85,7 +93,10 @@ class _HomeViewState extends State<HomeView> {
           // 라이브 위치 추천
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Text(_placeRec, style: const TextStyle(fontWeight: FontWeight.bold)),
+            child: Text(
+              _placeRec.isEmpty ? "📡 위치 기반 추천 불러오는 중..." : _placeRec,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
 
           // 북마크 리스트
